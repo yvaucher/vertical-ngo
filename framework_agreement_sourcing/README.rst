@@ -15,6 +15,10 @@ Also, since 2.0 the choice of which agreement to use for a sourcing is up to
 the user. The system will only propose an agreement if there is only one for
 the portfolio, date, incoterm, and product selected.
 
+Version 3.0, as you might expect, brings compatibility with version 3.0 of
+framework_agreement. This makes the concept of agreements closer to standard
+odoo pricelists, with the extra features of agreements added.
+
 Credits
 =======
 
