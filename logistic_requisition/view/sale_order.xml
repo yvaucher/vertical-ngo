@@ -17,6 +17,18 @@
         </field>
     </record>
 
+    <record id="view_order_form" model="ir.ui.view">
+      <field name="name">sale.order.form</field>
+      <field name="model">sale.order</field>
+      <field name="inherit_id" ref="logistic_order.view_order_form"/>
+      <field name="arch" type="xml">
+        <xpath expr="//field[@name='order_line']/form//field[@name='value_of_goods']"
+            position="attributes">
+          <attribute name="invisible"/>
+        </xpath>
+      </field>
+    </record>
+
     <record id="view_order_form1" model="ir.ui.view">
         <field name="name">sale.order.form</field>
         <field name="model">sale.order</field>
@@ -57,8 +69,8 @@
               position="after">
               <field name="price_is"/>
           </xpath>
-          <xpath expr="//field[@name='order_line']/form//field[@name='delay']" position="after">
-              <field name="lr_source_id" groups="base.group_no_one"/>
+          <xpath expr="//field[@name='order_line']/form//field[@name='delay']/.." position="after">
+              <field name="lr_source_id"/>
               <field name="sourcing_method"/>
           </xpath>
           <xpath expr="//field[@name='order_line']/form//field[@name='manually_sourced']" position="attributes">
@@ -91,6 +103,9 @@
         <field name="arch" type="xml">
           <xpath expr="//field[@name='order_line']/form//field[@name='stock_owner_id']" position="attributes">
             <attribute name="attrs">{'invisible': [('sourcing_method', 'not in', ['wh_dispatch', 'other'])]}</attribute>
+          </xpath>
+          <xpath expr="//field[@name='order_line']/form//field[@name='product_id']" position="attributes">
+            <attribute name="context_sourcing">{'sourcing_method': sourcing_method, 'lr_source_id': lr_source_id}</attribute>
           </xpath>
         </field>
     </record>
