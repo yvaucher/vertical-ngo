@@ -56,6 +56,7 @@
             <group>
               <group>
                 <field name="partner_id" on_change="onchange_partner_id(partner_id, context)" context="{'search_default_supplier':1, 'default_supplier':1, 'default_customer':0}" domain="[('supplier','=',True)]"/>
+                <field domain="[('type','=','purchase')]" name="pricelist_id" groups="product.group_purchase_pricelist" on_change="onchange_pricelist(pricelist_id, context)"/>
                 <field name="for_agreement"/><!-- vertical-ngo/framework_agreement_requisition -->
                 <field name="agreement_expected_date"
                   attrs="{'invisible': [('for_agreement', '=', False)]}" />
@@ -136,7 +137,6 @@
               <page string="Accounting and Currency">
                 <group>
                   <group>
-                    <field domain="[('type','=','purchase')]" name="pricelist_id" groups="product.group_purchase_pricelist" on_change="onchange_pricelist(pricelist_id, context)"/>
                     <field name="currency_id" groups="base.group_multi_currency" readonly="True" />
                     <field name="company_id" groups="base.group_multi_company" widget="selection"/>
                     <field name="journal_id" invisible='1'/>
