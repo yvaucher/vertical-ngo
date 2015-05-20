@@ -25,7 +25,7 @@ from openerp.osv import orm
 from openerp.tools.translate import _
 
 
-class logistic_requisition_source(orm.Model):
+class Source(orm.Model):
 
     """Adds support of framework agreement to source line"""
 
@@ -34,13 +34,13 @@ class logistic_requisition_source(orm.Model):
     _columns = {
         'portfolio_id': osv.fields.many2one('framework.agreement.portfolio',
                                             'Agreement Portfolio'),
-        'framework_agreement_id': osv.fields.many2one('framework.agreement',
+        'framework_agreement_id': osv.fields.many2one('product.pricelist',
                                                       'Agreement'),
         'framework_agreement_po_id': osv.fields.many2one(
             'purchase.order',
             'Agreement Purchase'),
         'supplier_id': osv.fields.related(
-            'framework_agreement_id', 'supplier_id',
+            'portfolio_id', 'supplier_id',
             type='many2one',  relation='res.partner',
             string='Agreement Supplier')}
 
@@ -83,7 +83,7 @@ class logistic_requisition_source(orm.Model):
         :returns: data dict to be used by orm.Model.create
 
         """
-        supplier = line.framework_agreement_id.supplier_id
+        supplier = line.portfolio_id.supplier_id
         add = line.requisition_id.consignee_shipping_id
         pick_type_id = self._get_po_picking_type_id(
             cr, uid, add, context=context)
@@ -124,39 +124,18 @@ class logistic_requisition_source(orm.Model):
         """
         data = {}
         acc_pos_obj = self.pool['account.fiscal.position']
-        pl_model = self.pool['product.pricelist']
-        currency = po_pricelist.currency_id
 
-        if line.framework_agreement_id:
-            price = line.framework_agreement_id.get_price(
-                line.proposed_qty, currency=currency)
-            supplier = line.framework_agreement_id.supplier_id
-            data['framework_agreement_id'] = line.framework_agreement_id.id
-        else:
-            supplier = po_supplier
-            price = 0.0
-            if po_pricelist:
-                price = pl_model.price_get(
-                    cr, uid,
-                    [po_pricelist.id],
-                    line.proposed_product_id.id,
-                    line.proposed_qty or 1.0,
-                    po_supplier.id,
-                    {'uom': line.proposed_uom_id.id})[po_pricelist.id]
-
-        if not price:
-            price = line.proposed_product_id.standard_price or 1.00
         taxes_ids = line.proposed_product_id.supplier_taxes_id
         taxes = acc_pos_obj.map_tax(
-            cr, uid, supplier.property_account_position, taxes_ids)
+            cr, uid, po_supplier.property_account_position, taxes_ids)
 
         data['order_id'] = po_id
         data['product_qty'] = line.proposed_qty
         data['product_id'] = line.proposed_product_id.id
         data['product_uom'] = line.proposed_uom_id.id
         data['lr_source_line_id'] = line.id
-        data['framework_agreement_id'] = line.framework_agreement_id.id
-        data['price_unit'] = price
+        data['pricelist_id'] = line.framework_agreement_id.id
+        data['price_unit'] = line.unit_cost
         data['name'] = line.proposed_product_id.name
         data['date_planned'] = line.requisition_id.date_delivery
         data['taxes_id'] = [(6, 0, taxes)]
@@ -191,7 +170,7 @@ class logistic_requisition_source(orm.Model):
         currency_obj = self.pool['res.currency']
         po_obj = self.pool['purchase.order']
         po_l_obj = self.pool['purchase.order.line']
-        supplier = main_source.framework_agreement_id.supplier_id
+        supplier = main_source.portfolio_id.supplier_id
         to_curr = pricelist.currency_id.id
         po_vals = self._prepare_purchase_order(cr, uid, main_source,
                                                pricelist, context=context)
@@ -252,7 +231,7 @@ class logistic_requisition_source(orm.Model):
                 _('There should be at least one agreement line'),
                 _('Please correct selection'))
 
-        supplier = main_source.framework_agreement_id.supplier_id
+        supplier = main_source.portfolio_id.supplier_id
         fback = supplier.property_product_pricelist_purchase
         pricelist = pricelist if pricelist else fback
         po_id = self._make_po_from_source_lines(
@@ -271,21 +250,29 @@ class logistic_requisition_source(orm.Model):
         """
         if self.framework_agreement_po_id:
             return []
-        agreement = self.framework_agreement_id
-        if not agreement:
-            return ['{0}: No Framework Agreement associated with this '
-                    'source'.format(self.name)]
-        if agreement.state != 'running':
-            return ['{0}: Selected Framework Agreement is {1} for this source,'
-                    ' it must be Running'.format(self.name, agreement.state)]
-        if agreement.available_quantity < self.proposed_qty:
+        pricelist = self.framework_agreement_id
+        portfolio = self.portfolio_id
+        if not pricelist:
+            return ['{0}: No Framework Agreement (pricelist) associated with '
+                    'this source'.format(self.name)]
+        if portfolio.state != 'running':
+            return ['{0}: Selected Portfolio is {1} for this source,'
+                    ' it must be Running'.format(self.name, portfolio.state)]
+        product = self.requisition_line_id.product_id
+        product_line = portfolio.get_line_for_product(product)
+        if not product_line:
+            return ['{0}: Selected Portfolio has no lines for product '
+                    '{1} '.format(self.name, product.name)]
+
+        if product_line.available_quantity < self.proposed_qty:
             return ['{0}: Selected Framework Agreement available quantity is '
                     'only {1} and this source proposed quantity is {2}. You '
                     'need to:'
                     '\n * Reduce proposed quantity of this source'
                     '\n * Fill remaining quantity with aditional(s) source(s)'
-                    .format(self.name, agreement.available_quantity,
+                    .format(self.name, product_line.available_quantity,
                             self.proposed_qty)]
+
         return []
 
     # ---------------Odoo onchange management ----------------------
@@ -304,6 +291,12 @@ class logistic_requisition_source(orm.Model):
         now = fields.datetime.now()
         return self.requisition_id.date or now
 
+    @api.onchange('sourcing_method')
+    def onchange_sourcing_method(self):
+        super(Source, self).onchange_sourcing_method()
+        if self.sourcing_method == 'fw_agreement':
+            self.price_is = 'fixed'
+
     @api.multi
     def _check_enought_qty(self, agreement):
         """ Raise a warning if quantity is not enough
@@ -320,8 +313,18 @@ class logistic_requisition_source(orm.Model):
 
             return {'warning': {'message': msg}}
 
-    @api.onchange('sourcing_method', 'portfolio_id', 'proposed_qty',
-                  'proposed_product_id')
+    @api.onchange('framework_agreement_id')
+    def onchange_agreement(self):
+        if self.framework_agreement_id and self.proposed_product_id:
+            self.unit_cost = self.framework_agreement_id.price_get(
+                self.proposed_product_id.id,
+                self.proposed_qty or 1.0,
+                self.portfolio_id.supplier_id.id,
+            )[self.framework_agreement_id.id]
+
+    # XXX disable automatic choice of agreement depending on other fields
+    # @api.onchange('sourcing_method', 'portfolio_id', 'proposed_qty',
+    #               'proposed_product_id')
     def update_agreement(self):
         """Update the choice of agreement depending on other fields.
 
